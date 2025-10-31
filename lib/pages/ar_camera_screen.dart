@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -31,14 +32,28 @@ class ARCameraScreen extends StatefulWidget {
   State<ARCameraScreen> createState() => _ARCameraScreenState();
 }
 
-class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProviderStateMixin {
+class _ARCameraScreenState extends State<ARCameraScreen>
+    with SingleTickerProviderStateMixin {
   bool _isScanning = false;
   CameraController? _controller;
   bool _isScreenReady = false;
-  final AIService _aiService = AIService();
+  final AIService _aiService = AIService(
+    config: AIServiceConfig(
+      enableGpuDelegate: true,
+      cpuThreads: 2,
+      maskBlurRadius: 1,
+      maskAlphaCutoff: 0.25,
+      outputJpegQuality: 75,
+    ),
+  );
   late HairColor _selectedColor;
   late AnimationController _scanController;
   late Animation<double> _scanAnimation;
+  Uint8List? _processedFrameBytes;
+  bool _isProcessingFrame = false;
+  DateTime _lastFrameProcessedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  static const Duration _frameInterval = Duration(milliseconds: 450);
 
   @override
   void initState() {
@@ -51,26 +66,20 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
     _scanAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _scanController, curve: Curves.easeInOut),
     );
-    _loadServices();
+    _initializeServices();
   }
 
-  Future<void> _loadServices() async {
+  Future<void> _initializeServices() async {
     try {
       final bool modelLoaded = await _aiService.loadModel();
       if (!modelLoaded && mounted) {
-        debugPrint("Error: Model AI gagal di-load.");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text("Gagal memuat engine AI."),
-            backgroundColor: AppColors.destructive,
-          ),
-        );
+        _showErrorSnackbar("Gagal memuat engine AI.");
         return;
       }
 
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        debugPrint("Error: No cameras available.");
+        if (mounted) _showErrorSnackbar("Tidak ada kamera ditemukan.");
         return;
       }
 
@@ -81,24 +90,32 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
 
       _controller = CameraController(
         frontCamera,
-        ResolutionPreset.high,
+        ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
       await _controller!.initialize();
+      await _startImageStream();
       if (!mounted) return;
 
       setState(() {
         _isScreenReady = true;
       });
     } catch (e) {
-      debugPrint("Failed to initialize services: $e");
+      debugPrint("Gagal menginisialisasi services: $e");
+      if (mounted) _showErrorSnackbar("Gagal memulai kamera.");
     }
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    if (_controller != null) {
+      if (_controller!.value.isStreamingImages) {
+        _controller!.stopImageStream();
+      }
+      _controller!.dispose();
+    }
     _aiService.dispose();
     _scanController.dispose();
     super.dispose();
@@ -115,6 +132,9 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
     _scanController.repeat();
 
     try {
+      if (_controller!.value.isStreamingImages) {
+        await _controller!.stopImageStream();
+      }
       final XFile originalImage = await _controller!.takePicture();
 
       final String processedImagePath = await _aiService.processImage(
@@ -139,8 +159,75 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
         setState(() {
           _isScanning = false;
         });
+        _showErrorSnackbar("Gagal mengambil gambar.");
+      }
+    } finally {
+      if (_controller != null && !_controller!.value.isStreamingImages) {
+        try {
+          await _startImageStream();
+        } catch (e) {
+          debugPrint('Gagal memulai ulang image stream: $e');
+        }
       }
     }
+  }
+
+  Future<void> _startImageStream() async {
+    if (_controller == null || _controller!.value.isStreamingImages) return;
+    await _controller!.startImageStream(_processCameraImage);
+  }
+
+  Future<void> _processCameraImage(CameraImage cameraImage) async {
+    if (!_isScreenReady || _controller == null) return;
+
+    if (_selectedColor.color == Colors.transparent) {
+      if (_processedFrameBytes != null && mounted) {
+        setState(() {
+          _processedFrameBytes = null;
+        });
+      }
+      return;
+    }
+
+    if (_isProcessingFrame) return;
+
+    final DateTime now = DateTime.now();
+    if (now.difference(_lastFrameProcessedAt) < _frameInterval) return;
+    
+    _isProcessingFrame = true;
+    _lastFrameProcessedAt = now;
+
+    try {
+      final Uint8List? frameBytes = await _aiService.processCameraImage(
+        cameraImage,
+        _controller!.description,
+        _selectedColor.color,
+      );
+
+      if (mounted && frameBytes != null) {
+        setState(() {
+          _processedFrameBytes = frameBytes;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error processing camera frame: $e');
+    } finally {
+      if(mounted) {
+        setState(() {
+          _isProcessingFrame = false;
+        });
+      }
+    }
+  }
+  
+  void _showErrorSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.destructive,
+      ),
+    );
   }
 
   @override
@@ -181,24 +268,42 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
       );
     }
 
-    final size = MediaQuery.of(context).size;
-    final deviceRatio = size.width / size.height;
-    final cameraRatio = _controller!.value.aspectRatio;
-    final scale = 1 / (cameraRatio * deviceRatio);
-
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          // Camera Preview
+          // Camera Preview & Processed Frame
           Positioned.fill(
-            child: Transform.scale(
-              scale: scale,
-              alignment: Alignment.center,
-              child: CameraPreview(_controller!),
+            child: Center(
+              child: AspectRatio(
+                aspectRatio: 3 / 4,
+                child: ClipRect(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // This Transform ensures the camera preview fills the 3/4 aspect ratio box
+                      // without being distorted.
+                      if (_controller != null && _controller!.value.isInitialized)
+                        Transform.scale(
+                          scale: _controller!.value.aspectRatio / (3 / 4),
+                          alignment: Alignment.center,
+                          child: CameraPreview(_controller!),
+                        ),
+                      if (_processedFrameBytes != null)
+                        IgnorePointer(
+                          child: Image.memory(
+                            _processedFrameBytes!,
+                            fit: BoxFit.cover, // BoxFit.cover will fill the 3/4 box
+                            gaplessPlayback: true,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
-          
+
           // Top gradient overlay
           Positioned(
             top: 0,
@@ -211,15 +316,15 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.6),
-                    Colors.black.withValues(alpha: 0.3),
+                    Colors.black.withOpacity(0.6),
+                    Colors.black.withOpacity(0.3),
                     Colors.transparent,
                   ],
                 ),
               ),
             ),
           ),
-          
+
           // Bottom gradient overlay
           Positioned(
             bottom: 0,
@@ -232,15 +337,15 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.8),
-                    Colors.black.withValues(alpha: 0.4),
+                    Colors.black.withOpacity(0.8),
+                    Colors.black.withOpacity(0.4),
                     Colors.transparent,
                   ],
                 ),
               ),
             ),
           ),
-          
+
           // Top Bar
           Positioned(
             top: 0,
@@ -249,7 +354,10 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
             child: SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -278,7 +386,7 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
               ),
             ),
           ),
-          
+
           // Bottom Controls
           Positioned(
             bottom: 0,
@@ -296,12 +404,12 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
               ),
             ),
           ),
-          
+
           // Scanning Overlay
           if (_isScanning)
             Positioned.fill(
               child: Container(
-                color: Colors.black.withValues(alpha: 0.7),
+                color: Colors.black.withOpacity(0.7),
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -335,7 +443,7 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
                             width: 60,
                             height: 60,
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.8),
+                              color: Colors.black.withOpacity(0.8),
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
@@ -359,10 +467,7 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
                       const SizedBox(height: 8),
                       Text(
                         'Applying ${_selectedColor.name}...',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
                       ),
                     ],
                   ),
@@ -381,14 +486,14 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: isActive 
-            ? Colors.black.withValues(alpha: 0.4)
-            : Colors.black.withValues(alpha: 0.2),
+        color: isActive
+            ? Colors.black.withOpacity(0.4)
+            : Colors.black.withOpacity(0.2),
         shape: BoxShape.circle,
         border: Border.all(
           color: isActive
-              ? Colors.white.withValues(alpha: 0.3)
-              : Colors.white.withValues(alpha: 0.1),
+              ? Colors.white.withOpacity(0.3)
+              : Colors.white.withOpacity(0.1),
           width: 1,
         ),
       ),
@@ -414,10 +519,10 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
           filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.transparent.withValues(alpha: 0.2), // <-- Perubahan di sini
+              color: Colors.black.withOpacity(0.2),
               borderRadius: BorderRadius.circular(28),
               border: Border.all(
-                color: Colors.transparent.withValues(alpha: 0.1), // <-- Perubahan di sini
+                color: Colors.white.withOpacity(0.1),
                 width: 1,
               ),
             ),
@@ -428,21 +533,26 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
               itemBuilder: (context, index) {
                 final color = kHairColors[index];
                 final isSelected = _selectedColor.id == color.id;
-                
+
                 return GestureDetector(
                   onTap: () {
                     setState(() {
                       _selectedColor = color;
+                      _processedFrameBytes = null;
+                      _lastFrameProcessedAt = DateTime.fromMillisecondsSinceEpoch(0);
                     });
                     widget.onColorSelect(color);
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 8,
+                    ),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? color.color.withValues(alpha: 0.9)
+                          ? color.color.withOpacity(0.9)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(20),
                       border: isSelected
@@ -455,7 +565,9 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
                         style: TextStyle(
                           color: isSelected ? Colors.white : Colors.white70,
                           fontSize: 14,
-                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                          fontWeight: isSelected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
                           letterSpacing: 0.3,
                         ),
                       ),
@@ -483,7 +595,7 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.3),
+                color: Colors.white.withOpacity(0.3),
                 width: 3,
               ),
             ),
@@ -497,7 +609,7 @@ class _ARCameraScreenState extends State<ARCameraScreen> with SingleTickerProvid
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withValues(alpha: 0.3),
+                  color: AppColors.primary.withOpacity(0.3),
                   blurRadius: 20,
                   spreadRadius: 2,
                 ),
